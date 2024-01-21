@@ -6,7 +6,7 @@ project(ZFrameRegistration)
 # Extension meta-information
 set(EXTENSION_HOMEPAGE "https://github.com/SlicerProstate/SlicerZFrameRegistration")
 set(EXTENSION_CATEGORY "IGT")
-set(EXTENSION_CONTRIBUTORS "Junichi Tokuda (SPL), Christian Herz (SPL), Simon Di Maio (SPL), Longquan Chen (SPL), Andrey Fedorov (SPL)")
+set(EXTENSION_CONTRIBUTORS "Junichi Tokuda (SPL), Christian Herz (SPL), Simon Di Maio (SPL), Longquan Chen (SPL), Andrey Fedorov (SPL), Franklin King (SNR)")
 set(EXTENSION_DESCRIPTION "This extension provides support for procedures with ZFrame Registration")
 set(EXTENSION_ICONURL "https://raw.githubusercontent.com/SlicerProstate/SlicerZFrameRegistration/master/ZFrameRegistration.png")
 set(EXTENSION_SCREENSHOTURLS "https://raw.githubusercontent.com/SlicerProstate/SlicerZFrameRegistration/master/Screenshots/1.png https://raw.githubusercontent.com/SlicerProstate/SlicerZFrameRegistration/master/Screenshots/2.png")

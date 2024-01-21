@@ -30,6 +30,24 @@
       <description>Slice where labeling ended.</description>
       <default>11</default>
     </integer>
+    <string>
+      <name>zframeConfig</name>
+      <longflag>--zframeConfig</longflag>
+      <label>Zframe Config</label>
+      <default>z001</default>
+    </string>
+    <string>
+      <name>frameTopology</name>
+      <longflag>--frameTopology</longflag>
+      <label>Frame Topology</label>
+      <default>[[30.0, 30.0, -30.0], [-30.0, 30.0, -30.0], [-30.0, -30.0, -30.0], [0.0, -1.0, 1.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0]]</default>
+    </string>
+    <string>
+      <name>zFrameFids</name>
+      <longflag>--zFrameFids</longflag>
+      <label>zFrame Fiducials</label>
+      <default> </default>
+    </string>
     <transform fileExtensions=".h5,.hdf5,.mat,.txt" type="linear">
       <name>outputTransform</name>
       <longflag>--outputTransform</longflag>
