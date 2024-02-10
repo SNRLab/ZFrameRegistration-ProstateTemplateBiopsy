@@ -6,7 +6,7 @@
   <version>0.0.1</version>
   <documentation-url>https://github.com/SlicerProstate/ZFrameRegistration</documentation-url>
   <license>Slicer</license>
-  <contributor>Junichi Tokuda (SPL), Longquan Chen (SPL), Christian Herz (SPL), Andriy Fedorov (SPL)</contributor>
+  <contributor>Junichi Tokuda (SPL), Longquan Chen (SPL), Christian Herz (SPL), Andriy Fedorov (SPL), Franklin King (SNR), Rebecca Lisk (SNR)</contributor>
   <acknowledgements>This work was partially funded by NIH grant NXNNXXNNNNNN-NNXN</acknowledgements>
   <parameters>
     <image>
