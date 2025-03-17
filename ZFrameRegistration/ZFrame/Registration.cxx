@@ -2753,6 +2753,7 @@ void Registration::OrderFidPoints(float points[7][2], float rmid, float cmid)
   float d2y=(points[pall[2]][1]-cmid);
   float nvecz=(d1x*d2y-d2x*d1y);
   int direction = 0;
+  //TODO: MAKE A SETTING FOR z005
   if(nvecz<0)
     direction = -1;
   else

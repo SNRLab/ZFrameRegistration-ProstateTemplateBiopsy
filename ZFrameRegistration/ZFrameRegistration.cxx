@@ -197,7 +197,7 @@ int main( int argc, char * argv[] )
     }
 
     // Toggle registration algorithm based on zframe configuration (currently, only z001 [7 fid], z002 [9 fid], z003 [9fid], and z004 [7fid])
-    if (zframeConfig == "z001" || zframeConfig == "z004")
+    if (zframeConfig == "z001" || zframeConfig == "z004" || zframeConfig == "z005")
     {
         // Zframe z001 is a 7-fiducial frame; run the 7-fiducial registration [Namespace zf_7fid]
         // Zframe z004 is a 7-fiducial frame; run the 7-fiducial registration [Namespace zf_7fid]
