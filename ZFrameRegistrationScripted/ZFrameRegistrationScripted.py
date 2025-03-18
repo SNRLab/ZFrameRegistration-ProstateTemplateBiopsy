@@ -1,8 +1,9 @@
-import os
+import os, sys
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
 import numpy as np
+from ZFrame.Registration import zf, Registration
 
 class ZFrameRegistrationScripted(ScriptedLoadableModule):
     def __init__(self, parent):
@@ -28,7 +29,25 @@ class ZFrameRegistrationScripted(ScriptedLoadableModule):
 class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
     def __init__(self, parent=None):
         ScriptedLoadableModuleWidget.__init__(self, parent)
-        
+    
+        if not parent:
+            self.parent = slicer.qMRMLWidget()
+            self.parent.setLayout(qt.QVBoxLayout())
+            self.parent.setMRMLScene(slicer.mrmlScene)
+        else:
+            self.parent = parent
+        self.layout = self.parent.layout()
+        if not parent:
+            self.setup()
+            self.parent.show()
+
+    def onReload(self,moduleName="ZFrameRegistrationScripted"):
+        if 'ZFrame.Registration' in sys.modules:
+            del sys.modules['ZFrame.Registration']
+            print("ZFrame.Registration Deleted")
+
+        globals()[moduleName] = slicer.util.reloadScriptedModule(moduleName)
+
     def setup(self):
         ScriptedLoadableModuleWidget.setup(self)
 
@@ -58,6 +77,7 @@ class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
         self.zframeConfigSelector = qt.QComboBox()
         self.zframeConfigSelector.addItems(["z001", "z002", "z003", "z004", "z005"])
         parametersFormLayout.addRow("Z-Frame Configuration: ", self.zframeConfigSelector)
+        self.zframeConfigSelector.setCurrentIndex(3)
         #self.zframeConfigSelector.connect("currentTextChanged(QString)", self.onZFrameConfigChanged)
 
         # Frame Topology Text Edit
@@ -69,7 +89,7 @@ class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
 
         # Initialize topology text for default selection
         #self.onZFrameConfigChanged(self.zframeConfigSelector.currentText)
-        self.frameTopologyTextEdit.setText("[30.0, 30.0, -30.0], [-30.0, 30.0, -30.0], [-30.0, -30.0, -30.0], [0.0, -1.0, 1.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0]")
+        self.frameTopologyTextEdit.setText("[40.0, 30.0, -30.0], [-30.0, 30.0, -30.0], [-40.0, -30.0, -30.0], [0.0, -1.0, 1.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0]")
 
         # Slice range
         self.sliceRangeWidget = slicer.qMRMLRangeWidget()
@@ -98,7 +118,7 @@ class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
         # Apply Button
         self.applyButton = qt.QPushButton("Apply")
         self.applyButton.toolTip = "Run the Z-frame registration."
-        self.applyButton.enabled = False
+        self.applyButton.enabled = True
         parametersFormLayout.addRow(self.applyButton)
         self.applyButton.connect('clicked(bool)', self.onApplyButton)
         
@@ -127,72 +147,136 @@ class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
             self.logic.run(self.inputSelector.currentNode(),
                      self.outputSelector.currentNode(),
                      self.zframeConfigSelector.currentText,
-                     self.sliceRangeWidget.minimumValue,
-                     self.sliceRangeWidget.maximumValue)
+                     self.frameTopologyTextEdit.toPlainText(),
+                     int(self.sliceRangeWidget.minimumValue),
+                     int(self.sliceRangeWidget.maximumValue))
         except Exception as e:
             slicer.util.errorDisplay("Failed to compute results: "+str(e))
             import traceback
             traceback.print_exc()
 
 class ZFrameRegistrationScriptedLogic(ScriptedLoadableModuleLogic):
-    def run(self, inputVolume, outputTransform, zframeConfig, startSlice, endSlice):
+    def run(self, inputVolume, outputTransform, zframeConfig, frameTopology, startSlice, endSlice):
         """
         Run the Z-frame registration algorithm
         """
         logging.info('Processing started')
         
         if not inputVolume or not outputTransform:
-            raise ValueError("Input volume or output transform is invalid")
+            raise ValueError("Input volume or output transform is missing")
             
         # Get image data
         imageData = inputVolume.GetImageData()
         if not imageData:
             raise ValueError("Input image is invalid")
-            
+        # Convert vtkImageData to numpy array
+        dim = imageData.GetDimensions()
+        imageData = vtk.util.numpy_support.vtk_to_numpy(imageData.GetPointData().GetScalars())
+        #imageData = imageData.reshape(dim[2], dim[1], dim[0])  # Note: VTK uses opposite order (z,y,x)
+        imageData = imageData.reshape(dim[0], dim[1], dim[2])
+
         # Get image properties
-        dimensions = imageData.GetDimensions()
-        spacing = inputVolume.GetSpacing()
         origin = inputVolume.GetOrigin()
+        spacing = inputVolume.GetSpacing()
         directions = vtk.vtkMatrix4x4()
         inputVolume.GetIJKToRASDirectionMatrix(directions)
-        
+
         # Create the RAS to LPS transform
         ras2lps = vtk.vtkMatrix4x4()
         ras2lps.Identity()
         ras2lps.SetElement(0,0,-1)
         ras2lps.SetElement(1,1,-1)
         
-        # Create the image to world transform
-        imageToWorld = vtk.vtkMatrix4x4()
-        imageToWorld.Identity()
+        # Create the image to world transform as numpy array
+        imageTransform = np.eye(4)  # Start with 4x4 identity matrix
         for i in range(3):
             for j in range(3):
-                imageToWorld.SetElement(i,j, spacing[j] * directions.GetElement(i,j))
-            imageToWorld.SetElement(i,3, origin[i])
-            
-        # TODO: Implement the actual Z-frame registration algorithm here
-        # This would need to be implemented based on the specific requirements
-        # of your Z-frame detection and registration method
+                imageTransform[i,j] = spacing[j] * directions.GetElement(i,j)
+            imageTransform[i,3] = origin[i]
+
+        ZmatrixBase = np.eye(4)
+        ZquaternionBase = [0.0, 0.0, 0.0, 1.0]
+        ZquaternionBase = zf.MatrixToQuaternion(ZmatrixBase)
+
+        sliceRange = [startSlice, endSlice]
+        Zposition = [0.0, 0.0, 0.0]
+        Zorientation = [0.0, 0.0, 0.0, 1.0]
+        result = False
+
+        #dim = [dimensions[0], dimensions[1], dimensions[2]]
+        #manualRegistration = False 
         
-        # For now, we'll just set up the infrastructure
-        
-        if zframeConfig in ["z001", "z004", "z005"]:
+        # Convert frameTopology string back into an array of floats
+        # "[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]"
+        frameTopologyArr = []
+        # Remove whitespace from the string and split
+        frameTopologyList = ''.join(frameTopology.split()).strip("[]").split("],[")
+        for n in frameTopologyList:
+            # Convert each coordinate string into floats
+            x, y, z = map(float, n.split(","))
+            frameTopologyArr.append([x, y, z])
+        # Final result is stored in frameTopologyArr[6][3]
+        # The first 3 rows contain the origin points in RAS coordinates of Side 1, Base, and Side 2, respectively. 
+        # The 4th, 5th, and 6th rows contain the diagonal vectors in RAS coordinates of Side 1, Base, and Side 2.
+
+        # TODO: Implement manual registration
+
+        # Toggle registration algorithm based on zframe configuration
+        sevenFidConfigs = ["z001", "z004", "z005"]
+        nineFidConfigs = ["z002", "z003"]
+
+        # If zframeConfig is z001, z004, or z005, then the user is using a 7-fiducial Z-frame
+        if zframeConfig in sevenFidConfigs:
             # 7-fiducial registration
             logging.info("Running 7-fiducial registration")
-            # TODO: Implement 7-fiducial registration
-        elif zframeConfig in ["z002", "z003"]:
+            registration = Registration(numFiducials=7)
+        elif zframeConfig in nineFidConfigs:
             # 9-fiducial registration
             logging.info("Running 9-fiducial registration")
-            # TODO: Implement 9-fiducial registration
+            registration = Registration(numFiducials=9)
         else:
             raise ValueError("Invalid Z-frame configuration")
+        
+        if registration:
+            registration.SetInputImage(imageData, imageTransform)
+            registration.SetOrientationBase(ZquaternionBase)
+            registration.SetFrameTopology(frameTopologyArr)
+            result, Zposition, Zorientation = registration.Register(sliceRange)
+        else:
+            raise ValueError("Invalid Z-frame configuration")
+        
+        if result:
+            matrix = zf.QuaternionToMatrix(Zorientation)
+
+            zMatrix = vtk.vtkMatrix4x4()
+            zMatrix.SetIdentity()
             
-        # For now, just set identity transform
-        outputTransform.SetMatrixTransformToParent(vtk.vtkMatrix4x4())
+            # Combine quaternion and position into a single matrix
+            zMatrix.SetElement(0,0, matrix[0][0])
+            zMatrix.SetElement(1,0, matrix[1][0])
+            zMatrix.SetElement(2,0, matrix[2][0])
+            zMatrix.SetElement(0,1, matrix[0][1])
+            zMatrix.SetElement(1,1, matrix[1][1])
+            zMatrix.SetElement(2,1, matrix[2][1])
+            zMatrix.SetElement(0,2, matrix[0][2])
+            zMatrix.SetElement(1,2, matrix[1][2])
+            zMatrix.SetElement(2,2, matrix[2][2])
+            zMatrix.SetElement(0,3, Zposition[0])
+            zMatrix.SetElement(1,3, Zposition[1])
+            zMatrix.SetElement(2,3, Zposition[2])
+            
+            print(f'RAS Transformation Matrix:\n {zMatrix}')
+            outputTransform.SetMatrixTransformToParent(zMatrix)
+            logging.info('Processing completed')
+            return True
+        else:
+            logging.error('Processing failed')
+            return False
+
         
-        logging.info('Processing completed')
         
-        return True
+        
+        
 
 # class ZFrameRegistrationScriptedTest(ScriptedLoadableModuleTest):
 #     def setUp(self):
