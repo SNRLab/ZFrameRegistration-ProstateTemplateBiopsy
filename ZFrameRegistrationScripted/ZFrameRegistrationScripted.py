@@ -42,6 +42,7 @@ class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
             self.parent.show()
 
     def onReload(self,moduleName="ZFrameRegistrationScripted"):
+        self.zFrameTopologies = {}
         if 'ZFrame.Registration' in sys.modules:
             del sys.modules['ZFrame.Registration']
             print("ZFrame.Registration Deleted")
@@ -52,6 +53,7 @@ class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
         ScriptedLoadableModuleWidget.setup(self)
 
         self.logic = ZFrameRegistrationScriptedLogic()
+        self.zFrameTopologies = {}
         
         # Parameters Area
         parametersCollapsibleButton = ctk.ctkCollapsibleButton()
@@ -72,13 +74,20 @@ class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
         self.inputSelector.setToolTip("Pick the input volume.")
         parametersFormLayout.addRow("Input Volume: ", self.inputSelector)
         self.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onInputVolumeSelected)
+
+        # Fiducial type selector
+        self.fiducialTypeSelector = qt.QComboBox()
+        self.fiducialTypeSelector.addItems(["7-fiducial", "9-fiducial"])
+        parametersFormLayout.addRow("Fiducial Frame Type: ", self.fiducialTypeSelector)
+        self.fiducialTypeSelector.setCurrentIndex(0)
         
         # Z-frame configuration selector
+        
         self.zframeConfigSelector = qt.QComboBox()
-        self.zframeConfigSelector.addItems(["z001", "z002", "z003", "z004", "z005"])
+        self.loadZFrameConfigs()
         parametersFormLayout.addRow("Z-Frame Configuration: ", self.zframeConfigSelector)
         self.zframeConfigSelector.setCurrentIndex(3)
-        #self.zframeConfigSelector.connect("currentTextChanged(QString)", self.onZFrameConfigChanged)
+        self.zframeConfigSelector.connect("currentTextChanged(QString)", self.onZFrameConfigChanged)
 
         # Frame Topology Text Edit
         self.frameTopologyTextEdit = qt.QTextEdit()
@@ -88,8 +97,7 @@ class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
         parametersFormLayout.addRow("Frame Topology: ", self.frameTopologyTextEdit)
 
         # Initialize topology text for default selection
-        #self.onZFrameConfigChanged(self.zframeConfigSelector.currentText)
-        self.frameTopologyTextEdit.setText("[40.0, 30.0, -30.0], [-30.0, 30.0, -30.0], [-40.0, -30.0, -30.0], [0.0, -1.0, 1.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0]")
+        self.onZFrameConfigChanged(self.zframeConfigSelector.currentText)
 
         # Slice range
         self.sliceRangeWidget = slicer.qMRMLRangeWidget()
@@ -130,23 +138,57 @@ class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
             self.sliceRangeWidget.minimum = 0
             self.sliceRangeWidget.maximum = dims[2]-1
 
-    # def onZFrameConfigChanged(self, configName):
-    #     """Update the topology text based on the selected Z-frame configuration"""
-    #     topologyMap = {
-    #         "z001": "7-fiducial configuration (standard)",
-    #         "z002": "9-fiducial configuration with additional anterior fiducials",
-    #         "z003": "9-fiducial configuration with additional posterior fiducials",
-    #         "z004": "7-fiducial configuration (variant 1)",
-    #         "z005": "7-fiducial configuration (variant 2)"
-    #     }
+    def loadZFrameConfigs(self):
+        """Load Z-frame configurations from configs.txt file"""
+        configPath = os.path.join(os.path.dirname(__file__), 'Resources', 'configs.txt')
+
+        self.zframeConfigSelector.clear()
         
-    #     self.topologyTextEdit.plainText = topologyMap.get(configName, "Unknown configuration")
+        try:
+            with open(configPath, 'r') as f:
+                lines = f.readlines()
+            
+            self.zFrameTopologies = {}
+            
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith('#'):  # Skip empty lines and comments
+                    continue
+                
+                # Split the line into config name and topology data
+                try:
+                    config_name, topology = line.split(':', 1)
+                    config_name = config_name.strip()
+                    topology = topology.strip()
+                    self.zFrameTopologies[config_name] = topology
+                except ValueError:
+                    logging.warning(f"Skipping invalid line in configs.txt: {line}")
+                    continue
+            
+            # Update the combo box with the config names
+            self.zframeConfigSelector.clear()
+            if self.zFrameTopologies:
+                self.zframeConfigSelector.addItems(sorted(self.zFrameTopologies.keys()))
+            else:
+                self.zframeConfigSelector.addItems(["Configs not found"])
+            
+        except Exception as e:
+            logging.error(f"Error loading Z-frame configurations: {str(e)}")
+            self.zframeConfigSelector.clear()
+            self.zframeConfigSelector.addItems(["Configs not found"])
+
+    def onZFrameConfigChanged(self, configName):
+        """Update the topology text based on the selected Z-frame configuration"""
+        # Update to use the loaded configurations
+        self.frameTopologyTextEdit.setText(self.zFrameTopologies.get(configName, "Unknown configuration"))
+
 
     def onApplyButton(self):
         try:
             self.logic.run(self.inputSelector.currentNode(),
                      self.outputSelector.currentNode(),
                      self.zframeConfigSelector.currentText,
+                     self.zframeTypeSelector.currentText,
                      self.frameTopologyTextEdit.toPlainText(),
                      int(self.sliceRangeWidget.minimumValue),
                      int(self.sliceRangeWidget.maximumValue))
@@ -156,7 +198,7 @@ class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
             traceback.print_exc()
 
 class ZFrameRegistrationScriptedLogic(ScriptedLoadableModuleLogic):
-    def run(self, inputVolume, outputTransform, zframeConfig, frameTopology, startSlice, endSlice):
+    def run(self, inputVolume, outputTransform, zframeConfig, zframeType, frameTopology, startSlice, endSlice):
         """
         Run the Z-frame registration algorithm
         """
@@ -172,8 +214,7 @@ class ZFrameRegistrationScriptedLogic(ScriptedLoadableModuleLogic):
         # Convert vtkImageData to numpy array
         dim = imageData.GetDimensions()
         imageData = vtk.util.numpy_support.vtk_to_numpy(imageData.GetPointData().GetScalars())
-        #imageData = imageData.reshape(dim[2], dim[1], dim[0])  # Note: VTK uses opposite order (z,y,x)
-        imageData = imageData.reshape(dim[0], dim[1], dim[2])
+        imageData = imageData.reshape(dim[2], dim[1], dim[0]).transpose(2,1,0) # Note: VTK uses opposite order (z,y,x)
 
         # Get image properties
         origin = inputVolume.GetOrigin()
@@ -222,15 +263,11 @@ class ZFrameRegistrationScriptedLogic(ScriptedLoadableModuleLogic):
         # TODO: Implement manual registration
 
         # Toggle registration algorithm based on zframe configuration
-        sevenFidConfigs = ["z001", "z004", "z005"]
-        nineFidConfigs = ["z002", "z003"]
-
-        # If zframeConfig is z001, z004, or z005, then the user is using a 7-fiducial Z-frame
-        if zframeConfig in sevenFidConfigs:
+        if zframeType == "7-fiducial":
             # 7-fiducial registration
             logging.info("Running 7-fiducial registration")
             registration = Registration(numFiducials=7)
-        elif zframeConfig in nineFidConfigs:
+        elif zframeType == "9-fiducial":
             # 9-fiducial registration
             logging.info("Running 9-fiducial registration")
             registration = Registration(numFiducials=9)
@@ -249,7 +286,6 @@ class ZFrameRegistrationScriptedLogic(ScriptedLoadableModuleLogic):
             matrix = zf.QuaternionToMatrix(Zorientation)
 
             zMatrix = vtk.vtkMatrix4x4()
-            zMatrix.SetIdentity()
             
             # Combine quaternion and position into a single matrix
             zMatrix.SetElement(0,0, matrix[0][0])

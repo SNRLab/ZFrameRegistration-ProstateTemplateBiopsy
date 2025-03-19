@@ -1,5 +1,7 @@
 import numpy as np
 from scipy.fft import fft2, ifft2
+import sys
+np.set_printoptions(threshold=sys.maxsize)
 
 class zf:
     @staticmethod
@@ -109,6 +111,31 @@ class zf:
         matrix[3][1] = 0.0
 
     @staticmethod
+    def QuaternionMultiply(q1, q2):
+        """Multiply two quaternions.
+        
+        Args:
+            q1 (numpy.ndarray): First quaternion [x, y, z, w]
+            q2 (numpy.ndarray): Second quaternion [x, y, z, w]
+            
+        Returns:
+            numpy.ndarray: Result quaternion [x, y, z, w]
+        """
+        result = np.zeros(4)
+        
+        # Extract components for clarity
+        x1, y1, z1, w1 = q1
+        x2, y2, z2, w2 = q2
+        
+        # Compute quaternion multiplication
+        result[0] = w1*x2 + x1*w2 + y1*z2 - z1*y2  # x
+        result[1] = w1*y2 - x1*z2 + y1*w2 + z1*x2  # y
+        result[2] = w1*z2 + x1*y2 - y1*x2 + z1*w2  # z
+        result[3] = w1*w2 - x1*x2 - y1*y2 - z1*z2  # w
+        
+        return result
+
+    @staticmethod
     def QuaternionDivide(q1, q2):
         """Divide two quaternions (q1/q2 = q1 * inverse(q2)).
         
@@ -138,7 +165,25 @@ class zf:
         result[2] = q1[3]*q2_inv[2] + q1[0]*q2_inv[1] - q1[1]*q2_inv[0] + q1[2]*q2_inv[3]
         result[3] = q1[3]*q2_inv[3] - q1[0]*q2_inv[0] - q1[1]*q2_inv[1] - q1[2]*q2_inv[2]
         
-        return result        
+        return result
+    
+    @staticmethod
+    def QuaternionRotateVector(q, v):
+        """Rotate a vector by a quaternion rotation.
+        
+        Args:
+            q (numpy.ndarray): Quaternion [x, y, z, w]
+            v (numpy.ndarray): Vector to rotate [x, y, z]
+            
+        Returns:
+            numpy.ndarray: Rotated vector [x, y, z]
+        """
+        # Extract quaternion components
+        qx, qy, qz, qw = q
+        
+        # Compute quaternion multiplication: q * [v,0] * q^(-1)
+        t = 2.0 * np.cross([qx, qy, qz], v)
+        return v + qw * t + np.cross([qx, qy, qz], t)    
         
 class Registration:
     def __init__(self, numFiducials=7):
@@ -158,7 +203,7 @@ class Registration:
         self.frameTopology = frameTopology
     
     def SetInputImage(self, inputImage, transform):
-        self.InputImage = inputImage
+        self.InputImage = inputImage.astype(int)
         self.InputImageDim = list(inputImage.shape)
         self.InputImageTrans = transform
         
@@ -200,7 +245,7 @@ class Registration:
         ntx, nty, ntz = tx/psi, ty/psi, tz/psi
         nsx, nsy, nsz = sx/psj, sy/psj, sz/psj
         nnx, nny, nnz = nx/psk, ny/psk, nz/psk
-        
+
         # Initialize matrices for averaging quaternions
         n = 0
         T = np.zeros((4, 4))  # Symmetric matrix for quaternion averaging
@@ -215,6 +260,7 @@ class Registration:
         # Process each slice in range
         print(f"Processing slices from {sliceRange[0]} to {sliceRange[1]}")
         for slindex in range(sliceRange[0], sliceRange[1]):
+            print(f"=== Current Slice Index: {slindex} ===")
             # Calculate image center offset
             hfovi = psi * (self.InputImageDim[0]-1) / 2.0
             hfovj = psj * (self.InputImageDim[1]-1) / 2.0
@@ -249,6 +295,7 @@ class Registration:
                 q = np.array(quaternion)
                 T += np.outer(q, q)
                 n += 1
+            print(f"=== End Slice Index: {slindex} ===\n")
                 
         if n <= 0:
             return False, None, None
@@ -256,6 +303,9 @@ class Registration:
         # Average position and normalize T matrix
         P /= float(n)
         T /= float(n)
+
+        # print(f"P: {P}")
+        # print(f"T: {T}")
         
         # Calculate eigenvalues and eigenvectors of T matrix
         eigenvals, eigenvecs = np.linalg.eigh(T)
@@ -332,7 +382,7 @@ class Registration:
         Iorientation = np.array(quaternion)
         ZorientationBase = np.array(ZquaternionBase)
         
-        # Find the 9 Z-frame fiducial intercept artifacts in the image
+        # Find the self.numFiducials Z-frame fiducial intercept artifacts in the image
         print("ZTrackerTransform - Searching fiducials...")
         Zcoordinates, tZcoordinates = self.LocateFiducials(SourceImage, dimension[0], dimension[1])
         if Zcoordinates is None:
@@ -346,7 +396,7 @@ class Registration:
             return False
         
         # Transform pixel coordinates into spatial coordinates
-        for i in range(9):
+        for i in range(self.numFiducials):
             # Put the image origin at the center
             tZcoordinates[i][0] = float(tZcoordinates[i][0]) - float(dimension[0]/2)
             tZcoordinates[i][1] = float(tZcoordinates[i][1]) - float(dimension[1]/2)
@@ -354,8 +404,6 @@ class Registration:
             # Scale coordinates by pixel size
             tZcoordinates[i][0] *= spacing[0]
             tZcoordinates[i][1] *= spacing[1]
-            
-            print(f"tZcoordinates post processing: [{tZcoordinates[i][0]}, {tZcoordinates[i][1]}]")
         
         # Compute relative pose between the Z-frame and the current image
         Zposition, Zorientation = self.LocalizeFrame(tZcoordinates)
@@ -365,14 +413,14 @@ class Registration:
         
         # Compute the Z-frame position in the image (RAS) coordinate system
         # Rotate vector using quaternion rotation
-        rotated_position = self.QuaternionRotateVector(Iorientation, Zposition)
+        rotated_position = zf.QuaternionRotateVector(Iorientation, Zposition)
         Zposition = Iposition + rotated_position
         
         # Combine orientations
-        Zorientation = self.QuaternionMultiply(Iorientation, Zorientation)
+        Zorientation = zf.QuaternionMultiply(Iorientation, Zorientation)
         
         # Calculate rotation from the base orientation
-        Zorientation = self.QuaternionDivide(Zorientation, ZorientationBase)
+        Zorientation = zf.QuaternionDivide(Zorientation, ZorientationBase)
         
         # Update the output parameters
         position[0] = Zposition[0]
@@ -398,8 +446,8 @@ class Registration:
                 or (None, None) if detection fails
         """
         # Initialize coordinate arrays
-        Zcoordinates = [[0, 0] for _ in range(7)]
-        tZcoordinates = [[0.0, 0.0] for _ in range(7)]
+        Zcoordinates = [[0, 0] for _ in range(self.numFiducials)]
+        tZcoordinates = [[0.0, 0.0] for _ in range(self.numFiducials)]
         
         # Transform the MR image to frequency domain (k-space)
         image_fft = fft2(SourceImage)
@@ -434,9 +482,9 @@ class Registration:
             
         PIreal /= max_absolute
         
-        # Find the top 7 peak image values
+        # Find the top self.numFiducials peak image values
         peak_count = 0
-        for i in range(7):
+        for i in range(self.numFiducials):
             # Find next peak value and its coordinates
             peak_val, peak_coords = self.FindMax(PIreal)
             Zcoordinates[i] = list(peak_coords)
@@ -487,7 +535,7 @@ class Registration:
         self.OrderFidPoints(tZcoordinates, center[0], center[1])
         
         # Update integer coordinates
-        for i in range(7):
+        for i in range(self.numFiducials):
             Zcoordinates[i] = [int(tZcoordinates[i][0]), int(tZcoordinates[i][1])]
         
         return Zcoordinates, tZcoordinates
@@ -663,64 +711,149 @@ class Registration:
             rmid (float): The center of the fiducial pattern in the row coordinate
             cmid (float): The center of the fiducial pattern in the column coordinate
         """
-        # Initialize prototype index lists
-        pall = [0, -1, 1, -1, 2, -1, 3, -1, 0]  # prototype index list for all points
-        pother = [4, 5, 6]  # indices of points other than corners
-        
-        # Find fiducial points that fit between the corners
-        for i in range(0, 7, 2):
-            for j in range(3):
-                if pother[j] == -1:
-                    # This point has already been placed
-                    continue
-                    
-                cdist = self.CoordDistance(points[pall[i]], points[pall[i+2]])
-                pdist1 = self.CoordDistance(points[pall[i]], points[pother[j]])
-                pdist2 = self.CoordDistance(points[pall[i+2]], points[pother[j]])
+        if self.numFiducials == 7:
+            # Initialize prototype index lists
+            pall = [0, -1, 1, -1, 2, -1, 3, -1, 0]  # prototype index list for all points
+            pother = [4, 5, 6]  # indices of points other than corners
                 
-                # Check for divide by zero
-                if cdist < self.MEPSILON:
-                    print("Registration::OrderFidPoints - divide by zero.")
-                    continue
+            # Find fiducial points that fit between the corners
+            for i in range(0, 7, 2):
+                for j in range(3):
+                    if pother[j] == -1:
+                        # This point has already been placed
+                        continue
+                        
+                    cdist = self.CoordDistance(points[pall[i]], points[pall[i+2]])
+                    pdist1 = self.CoordDistance(points[pall[i]], points[pother[j]])
+                    pdist2 = self.CoordDistance(points[pall[i+2]], points[pother[j]])
                     
-                if ((pdist1 + pdist2) / cdist) < 1.05:
-                    pall[i+1] = pother[j]
-                    pother[j] = -1
+                    # Check for divide by zero
+                    if cdist < self.MEPSILON:
+                        print("Registration::OrderFidPoints - divide by zero.")
+                        continue
+                        
+                    if ((pdist1 + pdist2) / cdist) < 1.05:
+                        pall[i+1] = pother[j]
+                        pother[j] = -1
+                        break
+            
+            # Find the -1 that marks the two corner points without an intermediate fiducial
+            for i in range(1, 9):
+                if pall[i] == -1:
                     break
-        
-        # Find the -1 that marks the two corner points without an intermediate fiducial
-        for i in range(1, 9):
-            if pall[i] == -1:
-                break
-        
-        # Determine direction to order points (clockwise in image)
-        d1x = points[pall[0]][0] - rmid
-        d1y = points[pall[0]][1] - cmid
-        d2x = points[pall[2]][0] - rmid
-        d2y = points[pall[2]][1] - cmid
-        nvecz = (d1x * d2y - d2x * d1y)
-        
-        # Set direction based on z-coordinate
-        direction = -1 if nvecz < 0 else 1
-        
-        # Create new ordered point list
-        pall2 = []
-        curr_i = i
-        for _ in range(7):
-            curr_i += direction
-            if curr_i == -1:
-                curr_i = 7
-            if curr_i == 9:
-                curr_i = 1
-            pall2.append(pall[curr_i])
-        
-        # Create temporary points array and copy ordered points
-        points_temp = [[points[idx][0], points[idx][1]] for idx in pall2]
-        
-        # Update original points array with ordered points
-        for i in range(7):
-            points[i][0] = points_temp[i][0]
-            points[i][1] = points_temp[i][1]
+            
+            # Determine direction to order points (clockwise in image)
+            d1x = points[pall[0]][0] - rmid
+            d1y = points[pall[0]][1] - cmid
+            d2x = points[pall[2]][0] - rmid
+            d2y = points[pall[2]][1] - cmid
+            nvecz = (d1x * d2y - d2x * d1y)
+            
+            # Set direction based on z-coordinate
+            direction = -1 if nvecz < 0 else 1
+            
+            # Create new ordered point list
+            pall2 = []
+            curr_i = i
+            for _ in range(7):
+                curr_i += direction
+                if curr_i == -1:
+                    curr_i = 7
+                if curr_i == 9:
+                    curr_i = 1
+                pall2.append(pall[curr_i])
+            
+            # Create temporary points array and copy ordered points
+            points_temp = [[points[idx][0], points[idx][1]] for idx in pall2]
+            
+            # Update original points array with ordered points
+            for i in range(7):
+                points[i][0] = points_temp[i][0]
+                points[i][1] = points_temp[i][1]
+        elif self.numFiducials == 9:
+            # Initialize arrays for sorting
+            sorter_array = [9, 1, 4, 6, 0, 0, 0, 0, 0]  # Initial indices for corner points
+            sorted_points = [True, True, True, True, False, False, False, False, False]
+            
+            # Find the 5 remaining non-corner fiducial points (Fid 2, 3, 5, 7, 8)
+            
+            # First, find point closest to points[1] (either Fid #1 or Fid #9)
+            shortest_dist = 10000
+            closest_index = 0
+            
+            for i in range(4, 9):
+                coord_dist = self.CoordDistance(points[1], points[i])
+                if coord_dist < shortest_dist:
+                    shortest_dist = coord_dist
+                    closest_index = i
+            
+            sorter_array[closest_index] = 2  # Label index in sorter array
+            sorted_points[closest_index] = True
+            
+            # Find second closest point to points[1] (either Fid #2 or Fid #8)
+            shortest_dist = 10000
+            for i in range(4, 9):
+                if not sorted_points[i]:
+                    coord_dist = self.CoordDistance(points[1], points[i])
+                    if coord_dist < shortest_dist:
+                        shortest_dist = coord_dist
+                        closest_index = i
+            
+            sorter_array[closest_index] = 3
+            sorted_points[closest_index] = True
+            
+            # Find point closest to points[2] (center of top row - Fid #5)
+            shortest_dist = 10000
+            for i in range(4, 9):
+                if not sorted_points[i]:
+                    coord_dist = self.CoordDistance(points[2], points[i])
+                    if coord_dist < shortest_dist:
+                        shortest_dist = coord_dist
+                        closest_index = i
+            
+            sorter_array[closest_index] = 5
+            sorted_points[closest_index] = True
+            
+            # Find point closest to points[0] (Fid #8 if points[0] is Fid #9; Fid #2 otherwise)
+            shortest_dist = 10000
+            for i in range(4, 9):
+                if not sorted_points[i]:
+                    coord_dist = self.CoordDistance(points[0], points[i])
+                    if coord_dist < shortest_dist:
+                        shortest_dist = coord_dist
+                        closest_index = i
+            
+            sorter_array[closest_index] = 8
+            sorted_points[closest_index] = True
+            
+            # Last unsorted point is Fid #7 or Fid #3
+            for i in range(4, 9):
+                if not sorted_points[i]:
+                    sorter_array[i] = 7
+                    sorted_points[i] = True
+            
+            # Sort points based on sorter_array
+            # Create list of (index, point) pairs
+            pairs = [(sorter_array[i], [points[i][0], points[i][1]]) 
+                    for i in range(9)]
+            
+            # Sort pairs based on index
+            pairs.sort(key=lambda x: x[0])
+            
+            # Update points with sorted coordinates
+            for i in range(9):
+                points[i][0] = pairs[i][1][0]
+                points[i][1] = pairs[i][1][1]
+            
+            # Order points so first fiducial is at bottom left corner
+            if points[0][0] > points[8][0]:
+                # Reverse array if x-coordinate of first point is greater than last
+                points.reverse()
+            
+            # Debug output
+            print("points[]:")
+            for i in range(9):
+                print(f"sorted points[{points[i][0]}][{points[i][1]}]")
 
     def LocalizeFrame(self, Zcoordinates):
         """Compute the pose of the fiducial frame relative to the image plane.
@@ -741,130 +874,279 @@ class Registration:
         def make_vector(x, y, z=0.0):
             return np.array([x, y, z])
         
-        # --- Compute diagonal points in the z-frame coordinates ---
-        # SIDE 1
-        # Map the three points for this z-fiducial
-        Pz1 = make_vector(Zcoordinates[0][0], Zcoordinates[0][1])
-        Pz2 = make_vector(Zcoordinates[1][0], Zcoordinates[1][1])
-        Pz3 = make_vector(Zcoordinates[2][0], Zcoordinates[2][1])
-        
-        # Origin and direction vector of diagonal fiducial
-        Oz = make_vector(*self.frameTopology[0])
-        Vz = make_vector(*self.frameTopology[3])
-        
-        # Solve for the diagonal intercept in Z-frame coordinates
-        P2f = self.SolveZ(Pz1, Pz2, Pz3, Oz, Vz)
-        if P2f is None:
-            return None, None
+        # 7 fiducial version
+        if self.numFiducials == 7:
+            # --- Compute diagonal points in the z-frame coordinates ---
+            # SIDE 1
+            # Map the three points for this z-fiducial
+            Pz1 = make_vector(Zcoordinates[0][0], Zcoordinates[0][1])
+            Pz2 = make_vector(Zcoordinates[1][0], Zcoordinates[1][1])
+            Pz3 = make_vector(Zcoordinates[2][0], Zcoordinates[2][1])
             
-        # BASE
-        Pz1 = make_vector(Zcoordinates[2][0], Zcoordinates[2][1])
-        Pz2 = make_vector(Zcoordinates[3][0], Zcoordinates[3][1])
-        Pz3 = make_vector(Zcoordinates[4][0], Zcoordinates[4][1])
-        
-        Oz = make_vector(*self.frameTopology[1])
-        Vz = make_vector(*self.frameTopology[4])
-        
-        P4f = self.SolveZ(Pz1, Pz2, Pz3, Oz, Vz)
-        if P4f is None:
-            return None, None
+            # Origin and direction vector of diagonal fiducial
+            Oz = make_vector(*self.frameTopology[0])
+            Vz = make_vector(*self.frameTopology[3])
             
-        # SIDE 2
-        Pz1 = make_vector(Zcoordinates[4][0], Zcoordinates[4][1])
-        Pz2 = make_vector(Zcoordinates[5][0], Zcoordinates[5][1])
-        Pz3 = make_vector(Zcoordinates[6][0], Zcoordinates[6][1])
-        
-        Oz = make_vector(*self.frameTopology[2])
-        Vz = make_vector(*self.frameTopology[5])
-        
-        P6f = self.SolveZ(Pz1, Pz2, Pz3, Oz, Vz)
-        if P6f is None:
-            return None, None
-        
-        # --- Compute Transformation Between Image and Frame ---
-        # Compute z-frame cross section coordinate frame
-        Vx = P2f - P6f
-        Vy = P4f - P6f
-        Vz = np.cross(Vx, Vy)
-        Vy = np.cross(Vz, Vx)
-        
-        # Normalize vectors
-        Vx = Vx / np.linalg.norm(Vx)
-        Vy = Vy / np.linalg.norm(Vy)
-        Vz = Vz / np.linalg.norm(Vz)
-        
-        # Create rotation matrix and convert to quaternion
-        rotation_matrix = np.column_stack((Vx, Vy, Vz))
-        Qft = zf.MatrixToQuaternion(np.eye(4))  # Initialize 4x4 matrix
-        Qft[:3, :3] = rotation_matrix
-        Qft = zf.MatrixToQuaternion(Qft)
-        
-        # Compute image cross-section coordinate frame
-        Pz1 = make_vector(Zcoordinates[1][0], Zcoordinates[1][1])
-        Pz2 = make_vector(Zcoordinates[3][0], Zcoordinates[3][1])
-        Pz3 = make_vector(Zcoordinates[5][0], Zcoordinates[5][1])
-        
-        Vx = Pz1 - Pz3
-        Vy = Pz2 - Pz3
-        Vz = np.cross(Vx, Vy)
-        Vy = np.cross(Vz, Vx)
-        
-        # Normalize vectors
-        Vx = Vx / np.linalg.norm(Vx)
-        Vy = Vy / np.linalg.norm(Vy)
-        Vz = Vz / np.linalg.norm(Vz)
-        
-        # Create rotation matrix and convert to quaternion
-        rotation_matrix = np.column_stack((Vx, Vy, Vz))
-        Qit = np.eye(4)
-        Qit[:3, :3] = rotation_matrix
-        Qit = zf.MatrixToQuaternion(Qit)
-        
-        # Compute rotation between frame and image
-        Zorientation = zf.QuaternionDivide(Qit, Qft)
-        
-        # Check rotation angle
-        angle = 2 * np.arccos(Zorientation[3])  # w component
-        if abs(angle) > 15.0:
-            print("Registration::LocalizeFrame - Rotation angle too large, something is wrong.")
-            return None, None
-        
-        # Compute axis of rotation
-        if angle == 0.0:
-            axis = np.array([1.0, 0.0, 0.0])
-        else:
-            denom = np.sqrt(1 - Zorientation[3] * Zorientation[3])
-            if abs(denom) < self.MEPSILON:
-                print("Registration::LocalizeFrame - Division by zero in axis calculation.")
+            # Solve for the diagonal intercept in Z-frame coordinates
+            # Assume distance between parallel fiducials is self.frameTopology[0][1]*2
+            # TODO: Perhaps the distance should be a parameter?
+            fiducialDistance = np.abs(self.frameTopology[0][1]*2)
+            P2f = self.SolveZ(Pz1, Pz2, Pz3, Oz, Vz, fiducialDistance)
+            if P2f is None:
                 return None, None
-            axis = Zorientation[:3] / denom
-            axis = axis / np.linalg.norm(axis)
-        
-        print(f"Rotation Angle [degrees]: {angle * 180.0 / np.pi}")
-        print(f"Rotation Axis: [{axis[0]}, {axis[1]}, {axis[2]}]")
-        
-        # Compute translational component
-        # Centroid of triangle in frame coordinates
-        Cf = (P2f + P4f + P6f) / 3.0
-        
-        # Centroid of frame triangle in image coordinates
-        Cfi = self.QuaternionRotateVector(Zorientation, Cf)
-        
-        # Centroid of triangle in image coordinates
-        Ci = (Pz1 + Pz2 + Pz3) / 3.0
-        
-        # Displacement of frame in image coordinates
-        Zposition = Ci - Cfi
-        
-        if abs(Zposition[2]) > 20.0:
-            print("Registration::LocalizeFrame - Displacement too large, something is wrong.")
-            return None, None
-        
-        print(f"Displacement [mm]: [{Zposition[0]}, {Zposition[1]}, {Zposition[2]}]")
-        
-        return Zposition, Zorientation
+                
+            # BASE
+            Pz1 = make_vector(Zcoordinates[2][0], Zcoordinates[2][1])
+            Pz2 = make_vector(Zcoordinates[3][0], Zcoordinates[3][1])
+            Pz3 = make_vector(Zcoordinates[4][0], Zcoordinates[4][1])
+            
+            Oz = make_vector(*self.frameTopology[1])
+            Vz = make_vector(*self.frameTopology[4])
+            
+            # Assume distance between parallel fiducials is self.frameTopology[1][0]*2
+            # TODO: Perhaps the distance should be a parameter?
+            fiducialDistance = np.abs(self.frameTopology[1][0]*2)
+            P4f = self.SolveZ(Pz1, Pz2, Pz3, Oz, Vz, fiducialDistance)
+            if P4f is None:
+                return None, None
+                
+            # SIDE 2
+            Pz1 = make_vector(Zcoordinates[4][0], Zcoordinates[4][1])
+            Pz2 = make_vector(Zcoordinates[5][0], Zcoordinates[5][1])
+            Pz3 = make_vector(Zcoordinates[6][0], Zcoordinates[6][1])
+            
+            Oz = make_vector(*self.frameTopology[2])
+            Vz = make_vector(*self.frameTopology[5])
+            
+            # Assume distance between parallel fiducials is self.frameTopology[2][1]*2
+            # TODO: Perhaps the distance should be a parameter?
+            fiducialDistance = np.abs(self.frameTopology[2][1]*2)
+            P6f = self.SolveZ(Pz1, Pz2, Pz3, Oz, Vz, fiducialDistance)
+            if P6f is None:
+                return None, None
+            
+            # --- Compute Transformation Between Image and Frame ---
+            # Compute z-frame cross section coordinate frame
+            Vx = P2f - P6f
+            Vy = P4f - P6f
 
-    def SolveZ(self, P1, P2, P3, Oz, Vz):
+            # Normalize Vx first
+            Vx = Vx / np.linalg.norm(Vx)
+
+            # Compute Vz using normalized Vx
+            Vz = np.cross(Vx, Vy)
+            Vz = Vz / np.linalg.norm(Vz)
+
+            # Recompute Vy to ensure perfect orthogonality
+            Vy = np.cross(Vz, Vx)
+            # Vy is automatically normalized since it's cross product of two unit vectors
+            
+            # Create rotation matrix and convert to quaternion
+            rotation_matrix = np.column_stack((Vx, Vy, Vz))
+            print(f"Qft rotation_matrix: {rotation_matrix}")
+            transform_matrix = np.eye(4)  # Initialize 4x4 matrix
+            transform_matrix[:3, :3] = rotation_matrix
+            Qft = zf.MatrixToQuaternion(transform_matrix) 
+            
+            # Compute image cross-section coordinate frame
+            Pz1 = make_vector(Zcoordinates[1][0], Zcoordinates[1][1])
+            Pz2 = make_vector(Zcoordinates[3][0], Zcoordinates[3][1])
+            Pz3 = make_vector(Zcoordinates[5][0], Zcoordinates[5][1])
+            
+            Vx = Pz1 - Pz3
+            Vy = Pz2 - Pz3
+            Vz = np.cross(Vx, Vy)
+            Vy = np.cross(Vz, Vx)
+            
+            # Normalize vectors
+            Vx = Vx / np.linalg.norm(Vx)
+            Vy = Vy / np.linalg.norm(Vy)
+            Vz = Vz / np.linalg.norm(Vz)
+            
+            # Create rotation matrix and convert to quaternion
+            rotation_matrix = np.column_stack((Vx, Vy, Vz))
+            transform_matrix = np.eye(4)
+            transform_matrix[:3, :3] = rotation_matrix
+            Qit = zf.MatrixToQuaternion(transform_matrix)
+            
+            # Compute rotation between frame and image
+            Zorientation = zf.QuaternionDivide(Qit, Qft)
+            
+            # Check rotation angle
+            angle = 2 * np.arccos(Zorientation[3])  # w component
+            if abs(angle) > 15.0:
+                print("Registration::LocalizeFrame - Rotation angle too large, something is wrong.")
+                return None, None
+            
+            # Compute axis of rotation
+            if angle == 0.0:
+                axis = np.array([1.0, 0.0, 0.0])
+            else:
+                denom = np.sqrt(1 - Zorientation[3] * Zorientation[3])
+                if abs(denom) < self.MEPSILON:
+                    print("Registration::LocalizeFrame - Division by zero in axis calculation.")
+                    return None, None
+                axis = Zorientation[:3] / denom
+                axis = axis / np.linalg.norm(axis)
+            
+            print(f"Rotation Angle [degrees]: {angle * 180.0 / np.pi}")
+            print(f"Rotation Axis: [{axis[0]}, {axis[1]}, {axis[2]}]")
+            
+            # Compute translational component
+            # Centroid of triangle in frame coordinates
+            Cf = (P2f + P4f + P6f) / 3.0
+            
+            # Centroid of frame triangle in image coordinates
+            Cfi = zf.QuaternionRotateVector(Zorientation, Cf)
+            
+            # Centroid of triangle in image coordinates
+            Ci = (Pz1 + Pz2 + Pz3) / 3.0
+            
+            # Displacement of frame in image coordinates
+            Zposition = Ci - Cfi
+            if abs(Zposition[2]) > 20.0:
+                print("Registration::LocalizeFrame - Displacement too large, something is wrong.")
+                return None, None
+            
+            print(f"Displacement [mm]: [{Zposition[0]}, {Zposition[1]}, {Zposition[2]}]")
+            
+            return Zposition, Zorientation
+        # 9 fiducial version
+        elif self.numFiducials == 9:
+            # --- Compute diagonal points in the z-frame coordinates ---
+            # SIDE 1
+            Pz1 = make_vector(Zcoordinates[0][0], Zcoordinates[0][1])
+            Pz2 = make_vector(Zcoordinates[1][0], Zcoordinates[1][1])
+            Pz3 = make_vector(Zcoordinates[2][0], Zcoordinates[2][1])
+            
+            # Origin and direction vector of diagonal fiducial
+            Oz = make_vector(*self.frameTopology[0])
+            Vz = make_vector(*self.frameTopology[3])
+            
+            # Solve for the diagonal intercept in Z-frame coordinates
+            # Assume distance between parallel fiducials is self.frameTopology[0][1]*2
+            # TODO: Perhaps the distance should be a parameter?
+            fiducialDistance = np.abs(self.frameTopology[0][1]*2)
+            P2f = self.SolveZ(Pz1, Pz2, Pz3, Oz, Vz, fiducialDistance)
+            if P2f is None:
+                return None, None
+            
+            # BASE
+            Pz1 = make_vector(Zcoordinates[3][0], Zcoordinates[3][1])
+            Pz2 = make_vector(Zcoordinates[4][0], Zcoordinates[4][1])
+            Pz3 = make_vector(Zcoordinates[5][0], Zcoordinates[5][1])
+            
+            Oz = make_vector(*self.frameTopology[1])
+            Vz = make_vector(*self.frameTopology[4])
+            
+            # Assume distance between parallel fiducials is self.frameTopology[1][0]*2
+            # TODO: Perhaps the distance should be a parameter?
+            fiducialDistance = np.abs(self.frameTopology[1][0]*2)
+            P4f = self.SolveZ(Pz1, Pz2, Pz3, Oz, Vz, fiducialDistance)
+            if P4f is None:
+                return None, None
+            
+            # SIDE 2
+            Pz1 = make_vector(Zcoordinates[6][0], Zcoordinates[6][1])
+            Pz2 = make_vector(Zcoordinates[7][0], Zcoordinates[7][1])
+            Pz3 = make_vector(Zcoordinates[8][0], Zcoordinates[8][1])
+            
+            Oz = make_vector(*self.frameTopology[2])
+            Vz = make_vector(*self.frameTopology[5])
+            
+            # Assume distance between parallel fiducials is self.frameTopology[2][1]*2
+            # TODO: Perhaps the distance should be a parameter?
+            fiducialDistance = np.abs(self.frameTopology[2][1]*2)
+            P6f = self.SolveZ(Pz1, Pz2, Pz3, Oz, Vz, fiducialDistance)
+            if P6f is None:
+                return None, None
+            
+            # --- Compute Transformation Between Image and Frame ---
+            # Compute z-frame cross section coordinate frame
+            Vx = P2f - P6f
+            Vy = P4f - P6f
+            
+            # Normalize Vx first
+            Vx = Vx / np.linalg.norm(Vx)
+            
+            # Compute Vz using normalized Vx
+            Vz = np.cross(Vx, Vy)
+            Vz = Vz / np.linalg.norm(Vz)
+            
+            # Recompute Vy to ensure perfect orthogonality
+            Vy = np.cross(Vz, Vx)
+            
+            # Create rotation matrix and convert to quaternion
+            rotation_matrix = np.column_stack((Vx, Vy, Vz))
+            transform_matrix = np.eye(4)
+            transform_matrix[:3, :3] = rotation_matrix
+            Qft = zf.MatrixToQuaternion(transform_matrix)
+            
+            # Check that the fiducial in the center of the top row is sufficiently centered
+            if abs(Zcoordinates[4][0]) > 10:
+                print("Registration::LocalizeFrame - Center & uppermost fiducial is not sufficiently centered along the x-axis")
+                return None, None
+            
+            # Compute image cross-section coordinate frame
+            Pz1 = make_vector(Zcoordinates[1][0], Zcoordinates[1][1])
+            Pz2 = make_vector(Zcoordinates[4][0], Zcoordinates[4][1])
+            Pz3 = make_vector(Zcoordinates[7][0], Zcoordinates[7][1])
+            
+            Vx = Pz1 - Pz3
+            Vy = Pz2 - Pz3
+            Vz = np.cross(Vx, Vy)
+            Vy = np.cross(Vz, Vx)
+            
+            # Normalize vectors
+            Vx = Vx / np.linalg.norm(Vx)
+            Vy = Vy / np.linalg.norm(Vy)
+            Vz = Vz / np.linalg.norm(Vz)
+            
+            # Create rotation matrix and convert to quaternion
+            rotation_matrix = np.column_stack((Vx, Vy, Vz))
+            transform_matrix = np.eye(4)
+            transform_matrix[:3, :3] = rotation_matrix
+            Qit = zf.MatrixToQuaternion(transform_matrix)
+            
+            # Compute rotation between frame and image
+            Zorientation = zf.QuaternionDivide(Qit, Qft)
+            
+            # Check rotation angle
+            angle = 2 * np.arccos(Zorientation[3])  # w component
+            if abs(angle) > 15.0:
+                print("Registration::LocalizeFrame - Rotation angle too large, something is wrong.")
+                return None, None
+            
+            # Compute axis of rotation
+            if angle == 0.0:
+                axis = np.array([1.0, 0.0, 0.0])
+            else:
+                denom = np.sqrt(1 - Zorientation[3] * Zorientation[3])
+                if abs(denom) < self.MEPSILON:
+                    print("Registration::LocalizeFrame - Division by zero in axis calculation.")
+                    return None, None
+                axis = Zorientation[:3] / denom
+                axis = axis / np.linalg.norm(axis)
+            
+            print(f"Rotation Angle [degrees]: {angle * 180.0 / np.pi}")
+            print(f"Rotation Axis: [{axis[0]}, {axis[1]}, {axis[2]}]")
+            
+            # Compute translational component
+            Cf = (P2f + P4f + P6f) / 3.0
+            Cfi = zf.QuaternionRotateVector(Zorientation, Cf)
+            Ci = (Pz1 + Pz2 + Pz3) / 3.0
+            
+            # Displacement of frame in image coordinates
+            Zposition = Ci - Cfi
+            if abs(Zposition[2]) > 20.0:
+                print("Registration::LocalizeFrame - Displacement too large, something is wrong.")
+                return None, None
+            
+            print(f"Displacement [mm]: [{Zposition[0]}, {Zposition[1]}, {Zposition[2]}]")
+            
+            return Zposition, Zorientation
+
+    def SolveZ(self, P1, P2, P3, Oz, Vz, fiducialDistance):
         """Find the point at which the diagonal line fiducial is intercepted.
         
         Uses the three intercepts for a single set of planar line fiducials
@@ -876,6 +1158,7 @@ class Registration:
             P3 (numpy.ndarray): Intercept point of third line fiducial in image
             Oz (numpy.ndarray): Origin of this side of the Z-frame, in Z-frame coordinates
             Vz (numpy.ndarray): Vector representing orientation of this side of Z-frame
+            fiducialDistance (float): Distance between parallel fiducials (used to calculate diagonal length)
             
         Returns:
             numpy.ndarray: Diagonal intercept in physical Z-frame coordinates (P2f),
@@ -893,8 +1176,8 @@ class Registration:
                 print("Registration::SolveZ - Division by zero in distance calculation.")
                 return None
                 
-            # Length of diagonal (60.0 * sqrt(2))
-            Ld = 60.0 * np.sqrt(2.0)
+            # Length of diagonal - Diagonal distance between parallel fiducials
+            Ld = fiducialDistance * np.sqrt(2.0)
             
             # Compute intercept length
             Lc = Ld * D23 / (D12 + D23)
