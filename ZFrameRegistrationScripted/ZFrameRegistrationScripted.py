@@ -191,7 +191,7 @@ class ZFrameRegistrationScriptedWidget(ScriptedLoadableModuleWidget):
             self.logic.run(self.inputSelector.currentNode(),
                      self.outputSelector.currentNode(),
                      self.zframeConfigSelector.currentText,
-                     self.zframeTypeSelector.currentText,
+                     self.fiducialTypeSelector.currentText,
                      self.frameTopologyTextEdit.toPlainText(),
                      int(self.sliceRangeWidget.minimumValue),
                      int(self.sliceRangeWidget.maximumValue))
