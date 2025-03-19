@@ -606,7 +606,7 @@ class ZFrameRegistration:
         def get_normalized_vector(p1, p2):
             vector = np.array([p2[0] - p1[0], p2[1] - p1[1]])
             norm = np.linalg.norm(vector)
-            return vector / norm if norm != 0 else vector
+            return vector / norm if norm != self.MEPSILON else vector
 
         # Get corner points
         P1 = np.array(Zcoordinates[0])
@@ -961,7 +961,6 @@ class ZFrameRegistration:
             
             # Create rotation matrix and convert to quaternion
             rotation_matrix = np.column_stack((Vx, Vy, Vz))
-            print(f"Qft rotation_matrix: {rotation_matrix}")
             transform_matrix = np.eye(4)  # Initialize 4x4 matrix
             transform_matrix[:3, :3] = rotation_matrix
             Qft = zf.MatrixToQuaternion(transform_matrix) 
@@ -975,11 +974,19 @@ class ZFrameRegistration:
             Vy = Pz2 - Pz3
             Vz = np.cross(Vx, Vy)
             Vy = np.cross(Vz, Vx)
-            
+
+            Vx_norm = np.linalg.norm(Vx)
+            Vy_norm = np.linalg.norm(Vy)
+            Vz_norm = np.linalg.norm(Vz)
+
+            if Vx_norm < self.MEPSILON or Vy_norm < self.MEPSILON or Vz_norm < self.MEPSILON:
+                print("Registration::LocalizeFrame - Vx, Vy, or Vz is too small, something is wrong.")
+                return None, None
+
             # Normalize vectors
-            Vx = Vx / np.linalg.norm(Vx)
-            Vy = Vy / np.linalg.norm(Vy)
-            Vz = Vz / np.linalg.norm(Vz)
+            Vx = Vx / Vx_norm
+            Vy = Vy / Vy_norm
+            Vz = Vz / Vz_norm
             
             # Create rotation matrix and convert to quaternion
             rotation_matrix = np.column_stack((Vx, Vy, Vz))
@@ -1085,11 +1092,19 @@ class ZFrameRegistration:
             Vy = P4f - P6f
             
             # Normalize Vx first
-            Vx = Vx / np.linalg.norm(Vx)
+            Vx_norm = np.linalg.norm(Vx)
+            if Vx_norm < self.MEPSILON:
+                print("Registration::LocalizeFrame - Vx is too small, something is wrong.")
+                return None, None
+            Vx = Vx / Vx_norm
             
             # Compute Vz using normalized Vx
             Vz = np.cross(Vx, Vy)
-            Vz = Vz / np.linalg.norm(Vz)
+            Vz_norm = np.linalg.norm(Vz)
+            if Vz_norm < self.MEPSILON:
+                print("Registration::LocalizeFrame - Vz is too small, something is wrong.")
+                return None, None
+            Vz = Vz / Vz_norm
             
             # Recompute Vy to ensure perfect orthogonality
             Vy = np.cross(Vz, Vx)
@@ -1114,11 +1129,19 @@ class ZFrameRegistration:
             Vy = Pz2 - Pz3
             Vz = np.cross(Vx, Vy)
             Vy = np.cross(Vz, Vx)
+
+            Vx_norm = np.linalg.norm(Vx)
+            Vy_norm = np.linalg.norm(Vy)
+            Vz_norm = np.linalg.norm(Vz)
+
+            if Vx_norm < self.MEPSILON or Vy_norm < self.MEPSILON or Vz_norm < self.MEPSILON:
+                print("Registration::LocalizeFrame - Vx, Vy, or Vz is too small, something is wrong.")
+                return None, None
             
             # Normalize vectors
-            Vx = Vx / np.linalg.norm(Vx)
-            Vy = Vy / np.linalg.norm(Vy)
-            Vz = Vz / np.linalg.norm(Vz)
+            Vx = Vx / Vx_norm
+            Vy = Vy / Vy_norm
+            Vz = Vz / Vz_norm
             
             # Create rotation matrix and convert to quaternion
             rotation_matrix = np.column_stack((Vx, Vy, Vz))
