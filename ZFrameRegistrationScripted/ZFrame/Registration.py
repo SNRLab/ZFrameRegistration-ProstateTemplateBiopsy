@@ -302,18 +302,38 @@ class ZFrameRegistration:
         P /= float(n)
         T /= float(n)
 
-        # print(f"P: {P}")
-        # print(f"T: {T}")
-        
         # Calculate eigenvalues and eigenvectors of T matrix
         eigenvals, eigenvecs = np.linalg.eigh(T)
         
         # Find maximum eigenvalue index
         max_idx = np.argmax(eigenvals)
-        
+
         # Create output arrays
         Zposition = P
         Zorientation = eigenvecs[:, max_idx]
+        
+        # Force alignment with Superior direction (0,0,1)
+        # TODO: This is to ensure orientation is correct. There should be some kind of parameter for this.
+        # Convert quaternion to rotation matrix to check orientation
+        transform_matrix = np.eye(4)
+        transform_matrix[:3, :3] = zf.QuaternionToMatrix(Zorientation)[:3, :3]
+        
+        # Get the Z direction (third column of rotation matrix)
+        z_direction = transform_matrix[:3, 2]
+        
+        # If Z direction is pointing opposite to superior direction (0,0,1)
+        if np.dot(z_direction, np.array([0, 0, 1])) < 0:
+            print("ZFrameRegistration - Correcting orientation to point superior")
+            rot_matrix = np.array([
+                [-1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, -1, 0],
+                [0, 0, 0, 1]
+            ])
+            # Apply the rotation
+            new_transform = np.dot(transform_matrix, rot_matrix)
+            # Convert back to quaternion
+            Zorientation = zf.MatrixToQuaternion(new_transform)
         
         return True, Zposition, Zorientation
 
