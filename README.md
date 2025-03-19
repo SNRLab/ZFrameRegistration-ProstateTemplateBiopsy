@@ -8,6 +8,39 @@ The registration of the intra-procedural image frame of reference with the trans
 ![](Screenshots/Animation.gif)
 
 ### Usage:
+
+### ZFrameRegistrationScripted
+
+##### Method 1: Using module
+
+Select input volume
+
+Select frame type
+
+Select Z-Frame configuration to set Frame Topology or adjust Frame Topology manually
+
+Select Slice Range
+
+Select Output Transform
+
+Click Apply
+
+
+##### Method 2: From interactor
+```
+import ZFrameRegistrationScripted
+zFrameConfig = 'z001'
+zFrameType = '7-fiducial' # Or '9-fiducial'
+frameTopology = '[30.0, 30.0, -30.0], [-30.0, 30.0, -30.0], [-30.0, -30.0, -30.0], [0.0, -1.0, 1.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0]'
+registrationLogic = ZFrameRegistrationScripted.ZFrameRegistrationScriptedLogic()
+startSlice = 6
+endSlice = 11
+registrationLogic.run(inputVolumeNode, outputTransformNode, zFrameConfig, zFrameType, frameTopology, startSlice, endSlice)
+```
+
+
+### ZFrameRegistrationWithROI
+
 #### With 3D slicer main window.
 1. After install the extension, the user need to switch to the module `ZFrameRegistrationWithROI`.
 2. Select the desired zFrame model from the list. The module provides two zFrame model options:
