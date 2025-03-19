@@ -1,9 +1,13 @@
 import os, sys
+moduleDir = os.path.dirname(os.path.realpath(__file__))
+if moduleDir not in sys.path:
+    sys.path.append(moduleDir)
+
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
 import numpy as np
-from ZFrame.Registration import zf, Registration
+from ZFrame.Registration import zf, ZFrameRegistration
 
 class ZFrameRegistrationScripted(ScriptedLoadableModule):
     def __init__(self, parent):
@@ -11,7 +15,7 @@ class ZFrameRegistrationScripted(ScriptedLoadableModule):
         self.parent.title = "ZFrameRegistration Scripted"
         self.parent.categories = ["IGT"]
         self.parent.dependencies = []
-        self.parent.contributors = ["Junichi Tokuda (SPL), Longquan Chen (SPL), Christian Herz (SPL), Andriy Fedorov (SPL), Franklin King (SPL)"]
+        self.parent.contributors = ["Junichi Tokuda (SPL), Longquan Chen (SPL), Christian Herz (SPL), Andriy Fedorov (SPL), Rebecca Lisk (SPL), Franklin King (SPL)"]
         self.parent.helpText = """
             This module performs Z-frame registration for image-guided interventions.
             It supports both 7-fiducial and 9-fiducial Z-frame configurations.
@@ -19,7 +23,6 @@ class ZFrameRegistrationScripted(ScriptedLoadableModule):
         self.parent.acknowledgementText = """
             
             """
-        moduleDir = os.path.dirname(self.parent.path)
         for iconExtension in ['.svg', '.png']:
             iconPath = os.path.join(moduleDir, 'Resources/Icons', self.__class__.__name__ + iconExtension)
             if os.path.isfile(iconPath):
@@ -266,11 +269,11 @@ class ZFrameRegistrationScriptedLogic(ScriptedLoadableModuleLogic):
         if zframeType == "7-fiducial":
             # 7-fiducial registration
             logging.info("Running 7-fiducial registration")
-            registration = Registration(numFiducials=7)
+            registration = ZFrameRegistration(numFiducials=7)
         elif zframeType == "9-fiducial":
             # 9-fiducial registration
             logging.info("Running 9-fiducial registration")
-            registration = Registration(numFiducials=9)
+            registration = ZFrameRegistration(numFiducials=9)
         else:
             raise ValueError("Invalid Z-frame configuration")
         

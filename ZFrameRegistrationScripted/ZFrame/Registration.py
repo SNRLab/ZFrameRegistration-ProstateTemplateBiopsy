@@ -1,7 +1,5 @@
 import numpy as np
 from scipy.fft import fft2, ifft2
-import sys
-np.set_printoptions(threshold=sys.maxsize)
 
 class zf:
     @staticmethod
@@ -185,7 +183,7 @@ class zf:
         t = 2.0 * np.cross([qx, qy, qz], v)
         return v + qw * t + np.cross([qx, qy, qz], t)    
         
-class Registration:
+class ZFrameRegistration:
     def __init__(self, numFiducials=7):
         self.numFiducials = numFiducials
         self.InputImage = None
